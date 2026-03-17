@@ -31,12 +31,19 @@ WC2022 = (43, 106)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _download(url: str, dest: Path) -> None:
-    """Download url → dest (only if not already cached)."""
+def _download(url: str, dest: Path) -> bool:
+    """Download url → dest (only if not already cached).
+    Returns True on success, False on failure."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if not dest.exists():
+    if dest.exists():
+        return True
+    try:
         print(f"  ↓ downloading {dest.name} ...")
         urllib.request.urlretrieve(url, dest)
+        return True
+    except Exception as e:
+        print(f"  ✗ failed to download {url}: {e}")
+        return False
 
 
 def _load_json(path: Path):
@@ -129,16 +136,19 @@ def metrica_tracking(game: int = 1, team: str = "Home") -> list:
     """
     fname = f"Sample_Game_{game}/Sample_Game_{game}_RawTrackingData_{team}_Team.csv"
     dest  = MET_ROOT / f"tracking_g{game}_{team.lower()}.csv"
-    _download(f"{MET_BASE}/{fname}", dest)
+    if not _download(f"{MET_BASE}/{fname}", dest):
+        return []
 
     rows = []
     with open(dest, newline="") as f:
         lines = f.readlines()
 
+    if len(lines) < 4:
+        return []
+
     # Three header rows: team names, shirt numbers, column roles
-    team_row   = next(csv.reader([lines[0]]))[3:]
-    num_row    = next(csv.reader([lines[1]]))[3:]
-    col_row    = next(csv.reader([lines[2]]))[3:]
+    num_row = next(csv.reader([lines[1]]))[3:]
+    col_row = next(csv.reader([lines[2]]))[3:]
 
     # Build column names
     named_cols = ["Period", "Frame", "Time"]
@@ -155,6 +165,52 @@ def metrica_tracking(game: int = 1, team: str = "Home") -> list:
     for row in reader:
         rows.append(dict(row))
     return rows
+
+
+def metrica_ball_tracking(game: int = 1) -> list:
+    """Load Metrica ball tracking data (25 fps).
+
+    game: 1 or 2
+
+    Returns list of row dicts with keys: 'Period', 'Frame', 'Time',
+    'ball_x', 'ball_y'. Coordinates are normalized 0–1.
+    Falls back to empty list if file not available.
+    """
+    fname = f"Sample_Game_{game}/Sample_Game_{game}_RawTrackingData_Ball.csv"
+    dest  = MET_ROOT / f"tracking_g{game}_ball.csv"
+
+    if not _download(f"{MET_BASE}/{fname}", dest):
+        print(f"  ℹ️  Ball tracking not available for game {game}, using fallback (center pitch)")
+        return []
+
+    rows = []
+    with open(dest, newline="") as f:
+        lines = f.readlines()
+
+    if len(lines) < 4:
+        return []
+
+    named_cols = ["Period", "Frame", "Time", "ball_x", "ball_y"]
+    reader = csv.DictReader(lines[3:], fieldnames=named_cols)
+    for row in reader:
+        rows.append(dict(row))
+    return rows
+
+
+def metrica_events(game: int = 1) -> list:
+    """Load Metrica event annotations.
+
+    Returns list of event dicts with keys: 'Type', 'Period', 'Start Frame',
+    'Start Time', 'End Frame', 'End Time', 'From', 'To'.
+    """
+    fname = f"Sample_Game_{game}/Sample_Game_{game}_RawEventsData.csv"
+    dest  = MET_ROOT / f"events_g{game}.csv"
+    if not _download(f"{MET_BASE}/{fname}", dest):
+        return []
+
+    with open(dest, newline="") as f:
+        reader = csv.DictReader(f)
+        return [dict(row) for row in reader]
 
 
 # ── Quick summary ─────────────────────────────────────────────────────────────
